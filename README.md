@@ -10,7 +10,7 @@ git clone https://github.com/Edward-Pratt/autocopy.git && cd autocopy && ./insta
 
 Requirements:
 
-- A Wayland compositor that supports the primary selection (Hyprland, Sway, GNOME, KDE)
+- A Wayland compositor that supports the primary selection (Hyprland, Sway, GNOME, KDE). On Hyprland, `misc:middle_click_paste` must be `true`: setting it to `false` turns off the primary selection.
 - `wl-clipboard` (`sudo pacman -S wl-clipboard`)
 - A systemd-managed session, so `graphical-session.target` is active (for example Hyprland started with uwsm)
 
