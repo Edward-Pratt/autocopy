@@ -1,0 +1,11 @@
+# Runs autocopy-update.service once a day, and after a boot that missed it.
+[Unit]
+Description=Check daily for a newer autocopy release
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,135 @@
+#!/bin/bash
+# herald's updater, copied into a project by `herald adopt` and installed as ~/.local/bin/<name>-update.
+# It follows the project's stable releases on GitHub: a daily timer runs `--check`, which only says on the desktop
+# that a release is ready; installing is a deliberate `<name>-update`.
+#
+#   <name>-update             install the newest release, if it's newer than the installed one
+#   <name>-update --check     say whether a newer release is ready (the timer runs this)
+#   <name>-update --rollback  reinstall the release installed before this one
+#
+# Each release is unpacked under ~/.local/share/<name>/releases/<tag> and installed by running the project's own
+# install script from there, so installing by hand and updating do the same thing. The two newest are kept.
+set -euo pipefail
+
+# Set by the project when it adopts the updater.
+name=autocopy                      # the command is $name-update; state lives in ~/.local/share/$name
+repo=Edward-Pratt/autocopy         # where the releases are
+private=no                        # yes: download through `gh`, which has the login a private repo needs
+install=install.sh                # run from the unpacked release, with HERALD_VERSION set
+
+# A release's source archive, as herald's workflow names it. A project that builds something names its file here.
+asset() { echo "$name-${1#v}.tar.gz"; }
+# BASE (and LATEST) are for testing: a folder of releases by tag, and the tag to call the newest.
+base=${HERALD_BASE:-https://github.com/$repo/releases/download}
+data=${XDG_DATA_HOME:-$HOME/.local/share}/$name
+
+notify() {
+  # The timer's unit sets HERALD_NOTIFY; from a terminal, the output is enough.
+  if [ -n "${HERALD_NOTIFY:-}" ] && command -v notify-send >/dev/null; then
+    notify-send --app-name="$name" "$@" || true
+  fi
+}
+work=
+finish() {
+  local status=$?
+  rm -rf "$work"
+  [ $status -eq 0 ] || notify "$name update failed" "See journalctl --user -u $name-update"
+}
+trap finish EXIT
+
+fetch() { # url destination: HTTPS only, redirects included (file:// for tests)
+  curl --fail --silent --show-error --location --proto '=https,file' --proto-redir '=https' --retry 2 -o "$2" "$1"
+}
+
+latest() { # prints the newest stable tag
+  local tag
+  if [ -n "${HERALD_LATEST:-}" ]; then
+    tag=$HERALD_LATEST
+  elif [ "$private" = yes ]; then
+    tag=$(gh release view --repo "$repo" --json tagName --jq .tagName)
+  else
+    # GitHub redirects this to the newest release that isn't a pre-release, or to the list when there's none.
+    tag=$(curl --fail --silent --show-error --proto '=https' --retry 2 --output /dev/null \
+      --write-out '%{redirect_url}' "https://github.com/$repo/releases/latest")
+    tag=${tag##*/releases/tag/}
+  fi
+  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "$name has no stable release yet." >&2; exit 1; }
+  echo "$tag"
+}
+
+download() { # tag file destination
+  if [ "$private" = yes ] && [ -z "${HERALD_BASE:-}" ]; then
+    gh release download "$1" --repo "$repo" --pattern "$2" --output "$3"
+  else
+    fetch "$base/$1/$2" "$3"
+  fi
+}
+
+installed=$(cat "$data/installed" 2>/dev/null || echo none)
+
+install_tag() { # tag: unpack it under releases/ and run its install script
+  local tag=$1 file dir
+  file=$(asset "$tag")
+  dir=$data/releases/$tag
+  if [ ! -f "$dir/.verified" ]; then
+    echo "Downloading $name $tag…"
+    mkdir -p "$data/releases"
+    work=$(mktemp -d "$data/download.XXXXXX")
+    download "$tag" SHA256SUMS "$work/SHA256SUMS"
+    download "$tag" "$file" "$work/$file"
+    # Only this file's line, so a release with more files still checks.
+    grep -E "^[0-9a-f]{64}  $file\$" "$work/SHA256SUMS" >"$work/sum" || { echo "$tag has no checksum for $file." >&2; exit 1; }
+    (cd "$work" && sha256sum --check --quiet --strict sum) || { echo "$file doesn't match its checksum." >&2; exit 1; }
+    mkdir "$work/unpacked"
+    tar -xzf "$work/$file" -C "$work/unpacked" --no-same-owner --no-same-permissions
+    # The archive holds one folder; that folder is the release.
+    local top
+    top=$(find "$work/unpacked" -mindepth 1 -maxdepth 1)
+    [ "$(wc -l <<<"$top")" -eq 1 ] && [ -d "$top" ] || { echo "$file doesn't hold one folder." >&2; exit 1; }
+    rm -rf "$dir"
+    mv "$top" "$dir"
+    touch "$dir/.verified"
+  fi
+  [ -x "$dir/$install" ] || { echo "$tag has no $install to run." >&2; exit 1; }
+  (cd "$dir" && HERALD_VERSION=${tag#v} "./$install")
+  # The one installed before stays for --rollback; older ones go.
+  if [ "$installed" != none ] && [ "$installed" != "$tag" ]; then echo "$installed" >"$data/previous"; fi
+  echo "$tag" >"$data/installed"
+  local keep r
+  keep=$(cat "$data/previous" 2>/dev/null || true)
+  for r in "$data"/releases/*; do
+    [ -e "$r" ] || continue
+    case ${r##*/} in "$tag" | "$keep") ;; *) rm -rf "$r" ;; esac
+  done
+  echo "Installed $name $tag."
+}
+
+case ${1:-} in
+  --check)
+    tag=$(latest)
+    echo "installed $installed"
+    echo "available $tag"
+    # Once per release, or the timer would say it every day.
+    if [ "$installed" != "$tag" ] && [ "$(cat "$data/notified" 2>/dev/null)" != "$tag" ]; then
+      notify "$name $tag is ready" "Run $name-update to install it."
+      mkdir -p "$data"
+      echo "$tag" >"$data/notified"
+    fi
+    ;;
+  --rollback)
+    previous=$(cat "$data/previous" 2>/dev/null) || { echo "There's no earlier release to go back to." >&2; exit 1; }
+    install_tag "$previous"
+    ;;
+  "")
+    tag=$(latest)
+    if [ "$installed" = "$tag" ]; then
+      echo "$name is up to date: $tag."
+      exit 0
+    fi
+    install_tag "$tag"
+    ;;
+  *)
+    sed -n '5,7s/^# //p' "$0" >&2
+    exit 2
+    ;;
+esac
