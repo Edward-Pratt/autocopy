@@ -1,0 +1,13 @@
+# Made by `herald adopt source`. A vX.Y.Z tag (from `herald release`) becomes a GitHub release carrying a source
+# archive of the tag and its SHA256SUMS; a vX.Y.Z-rc.N tag becomes a pre-release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: Edward-Pratt/herald/.github/workflows/release.yml@v1
+    permissions:
+      contents: write
