@@ -1,0 +1,9 @@
+# herald's updater check: says on the desktop when a newer release is ready. Installed by the project's install script
+# as ~/.config/systemd/user/autocopy-update.service, with autocopy replaced by the project's name.
+[Unit]
+Description=Check for a newer autocopy release
+
+[Service]
+Type=oneshot
+Environment=HERALD_NOTIFY=1
+ExecStart=%h/.local/bin/autocopy-update --check
