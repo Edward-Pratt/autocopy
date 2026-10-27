@@ -20,4 +20,6 @@ systemctl --user daemon-reload
 systemctl --user enable autocopy.service
 systemctl --user restart autocopy.service
 systemctl --user enable --now autocopy-update.timer
+# From a clone, note the release it's on (if any), so the first daily check doesn't announce what's installed.
+[ -n "${HERALD_VERSION:-}" ] || "$HOME/.local/bin/autocopy-update" --record "$PWD"
 echo "autocopy ${HERALD_VERSION:+$HERALD_VERSION }installed. Highlighted text now goes to the clipboard."

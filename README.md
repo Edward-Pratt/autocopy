@@ -24,7 +24,7 @@ Once a day a systemd user timer checks for a newer release and says so in a desk
 autocopy-update
 ```
 
-It downloads the release from GitHub, checks it against the release's `SHA256SUMS`, and runs that release's `install.sh`, so run it from a terminal inside your Wayland session. `autocopy-update --check` only checks, and `autocopy-update --rollback` goes back to the release installed before. Releases are kept in `~/.local/share/autocopy/releases`. After installing from a clone, the first check offers the newest release, since the updater can't tell which commit you cloned. The updater follows stable releases only; it never installs a pre-release or the main branch.
+It downloads the release from GitHub, checks it against the release's `SHA256SUMS`, and runs that release's `install.sh`, so run it from a terminal inside your Wayland session. `autocopy-update --check` only checks, and `autocopy-update --rollback` goes back to the release installed before. Releases are kept in `~/.local/share/autocopy/releases`. An install from a clone checked out at a release tag counts as that release; from any other commit, the first check offers the newest release. The updater follows stable releases only; it never installs a pre-release or the main branch.
 
 ## How it works
 

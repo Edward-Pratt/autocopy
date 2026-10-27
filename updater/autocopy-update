@@ -6,6 +6,7 @@
 #   <name>-update             install the newest release, if it's newer than the installed one
 #   <name>-update --check     say whether a newer release is ready (the timer runs this)
 #   <name>-update --rollback  reinstall the release installed before this one
+#   <name>-update --record DIR  note that DIR, a clone checked out at a release tag, was installed (install.sh runs this)
 #
 # Each release is unpacked under ~/.local/share/<name>/releases/<tag> and installed by running the project's own
 # install script from there, so installing by hand and updating do the same thing. The two newest are kept.
@@ -41,20 +42,26 @@ fetch() { # url destination: HTTPS only, redirects included (file:// for tests)
   curl --fail --silent --show-error --location --proto '=https,file' --proto-redir '=https' --retry 2 -o "$2" "$1"
 }
 
-latest() { # prints the newest stable tag
-  local tag
+latest() { # prints the newest stable tag, or nothing when there's no stable release yet
+  local tag out
   if [ -n "${HERALD_LATEST:-}" ]; then
     tag=$HERALD_LATEST
   elif [ "$private" = yes ]; then
-    tag=$(gh release view --repo "$repo" --json tagName --jq .tagName)
+    if ! out=$(gh release view --repo "$repo" --json tagName --jq .tagName 2>&1); then
+      # gh says "release not found" when there are only pre-releases or none; anything else is a real failure.
+      grep -q 'release not found' <<<"$out" && return 0
+      echo "$out" >&2
+      exit 1
+    fi
+    tag=$out
   else
     # GitHub redirects this to the newest release that isn't a pre-release, or to the list when there's none.
     tag=$(curl --fail --silent --show-error --proto '=https' --retry 2 --output /dev/null \
       --write-out '%{redirect_url}' "https://github.com/$repo/releases/latest")
     tag=${tag##*/releases/tag/}
   fi
-  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "$name has no stable release yet." >&2; exit 1; }
-  echo "$tag"
+  [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "$tag"
+  return 0
 }
 
 download() { # tag file destination
@@ -108,6 +115,8 @@ case ${1:-} in
   --check)
     tag=$(latest)
     echo "installed $installed"
+    # No stable release yet is nothing to report, not a failure to notify about.
+    [ -n "$tag" ] || { echo "available none"; exit 0; }
     echo "available $tag"
     # Once per release, or the timer would say it every day.
     if [ "$installed" != "$tag" ] && [ "$(cat "$data/notified" 2>/dev/null)" != "$tag" ]; then
@@ -116,12 +125,22 @@ case ${1:-} in
       echo "$tag" >"$data/notified"
     fi
     ;;
+  --record)
+    # A clone install has no release to point at, so the first check would announce the release it already has.
+    # A clone sitting exactly on a stable tag is that release; anything else stays unknown.
+    tag=$(git -C "${2:?--record needs the clone}" describe --exact-match --tags HEAD 2>/dev/null || true)
+    if [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      mkdir -p "$data"
+      echo "$tag" >"$data/installed"
+    fi
+    ;;
   --rollback)
     previous=$(cat "$data/previous" 2>/dev/null) || { echo "There's no earlier release to go back to." >&2; exit 1; }
     install_tag "$previous"
     ;;
   "")
     tag=$(latest)
+    [ -n "$tag" ] || { echo "$name has no stable release yet." >&2; exit 1; }
     if [ "$installed" = "$tag" ]; then
       echo "$name is up to date: $tag."
       exit 0
@@ -129,7 +148,7 @@ case ${1:-} in
     install_tag "$tag"
     ;;
   *)
-    sed -n '5,7s/^# //p' "$0" >&2
+    sed -n '6,9s/^# //p' "$0" >&2
     exit 2
     ;;
 esac
