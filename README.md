@@ -14,7 +14,7 @@ This installs `autocopy`, its systemd user service, and `autocopy-update` with i
 
 Requirements:
 
-- A Wayland compositor with the `ext-data-control-v1` protocol and a primary selection: Hyprland 0.47+, Sway with wlroots 0.19+, KDE Plasma 6.3+. On Hyprland, `misc:middle_click_paste` must be `true`: setting it to `false` turns off the primary selection.
+- A Wayland compositor with the `ext-data-control-v1` protocol and a primary selection (recent Hyprland, Sway and KDE Plasma have both). On Hyprland, `misc:middle_click_paste` must be `true`: setting it to `false` turns off the primary selection.
 - A C compiler, `make`, `pkg-config`, `wayland` and `wayland-protocols` 1.39+ (`sudo pacman -S base-devel wayland wayland-protocols`). Hyprland already pulls in the last two.
 - A systemd-managed session, so `graphical-session.target` is active (for example Hyprland started with uwsm)
 
@@ -39,7 +39,7 @@ autocopy is a small daemon that watches the primary selection (the text you high
 
 Which window has focus comes from Hyprland's IPC socket. On another compositor there is no window check, so every paste pastes the highlight, as a plain select-to-copy tool would.
 
-Text highlighted in a password field is marked sensitive and is not copied. Dragging a selection in an app that does not release the primary selection on mouse press merges the new drag into the previous highlight, so the previous highlight is not kept as the clipboard; most toolkits do release it.
+Text highlighted in a password field is marked sensitive and is not copied, and a password manager's clipboard is left with the manager so its own clearing keeps working. Launchers and other overlays are not windows, so highlighting text and pasting it into one counts as pasting in the same window: the paste gives the previous clipboard, not the highlight. Dragging a selection in an app that does not release the primary selection on mouse press merges the new drag into the previous highlight, so the previous highlight is not kept as the clipboard; most toolkits do release it.
 
 ## Uninstall
 

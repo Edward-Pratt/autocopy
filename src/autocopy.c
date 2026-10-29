@@ -326,6 +326,10 @@ static void snapshot(void)
 	if (!cur_offer)
 		return;
 	struct offer_info *oi = ext_data_control_offer_v1_get_user_data(cur_offer);
+	// A password manager's clipboard stays with the manager, so its own
+	// clearing keeps working. Pasting over a highlight still reads from it.
+	if (offer_has(oi, "x-kde-passwordManagerHint"))
+		return;
 	struct content c = { 0 };
 	for (size_t i = 0; i < oi->n; i++) {
 		size_t len;
@@ -364,7 +368,7 @@ static void on_primary_data(char *text, size_t len)
 		}
 	}
 	if (!sel) {
-		if (!clip_source)
+		if (!clip_source && focused[0])
 			snapshot();
 		snprintf(sel_window, sizeof sel_window, "%s", focused);
 	}
@@ -374,6 +378,9 @@ static void on_primary_data(char *text, size_t len)
 	sel_live = 1;
 	// A paste-over explains only the clearing of the text it pasted over.
 	last_paste_over = -1000000;
+	// No window to compare against: plain select-to-copy.
+	if (!focused[0])
+		commit();
 }
 
 static void on_primary_clear(void)
@@ -556,8 +563,16 @@ static int hypr_read(int fd, char *buf, size_t *n, size_t cap)
 	char *line = buf, *nl;
 	while ((nl = strchr(line, '\n'))) {
 		*nl = 0;
-		if (!strncmp(line, "activewindowv2>>", 16))
+		if (!strncmp(line, "activewindowv2>>", 16)) {
 			set_focused(line + 16);
+			// Leaving the highlight's window: it was made to be pasted elsewhere.
+			// Committing now offers only text, so an app that prefers an image or
+			// HTML type does not get the old clipboard instead.
+			if (sel && focused[0] && strcmp(focused, sel_window)) {
+				logf_("focus moved to %s: selection copied", focused);
+				commit();
+			}
+		}
 		line = nl + 1;
 	}
 	*n = strlen(line);
