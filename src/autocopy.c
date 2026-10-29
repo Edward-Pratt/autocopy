@@ -38,6 +38,7 @@
 #define RECEIVE_TIMEOUT_MS 1000   // a stalled clipboard owner must not hang us
 #define PASTE_OVER_WINDOW_MS 300  // primary cleared this soon after a paste-over: the app replaced it
 #define OWN_SETTLE_MS 100         // reads this soon after we set the clipboard are watchers, not pastes
+#define RELEASE_GRACE_MS 100      // Chromium clears and re-sets primary on every drag step
 
 static const char *const text_mimes[] = {
 	"text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT",
@@ -80,6 +81,7 @@ static char focused[64];
 
 static long last_paste_over = -1000000;
 static long last_own_set = -1000000;
+static long release_at = -1; // when a pending primary clear becomes a release, -1 for none
 
 static long now_ms(void);
 
@@ -299,6 +301,7 @@ static void own(struct content *c)
 // The highlight becomes the clipboard, offered as every common text type.
 static void commit(void)
 {
+	release_at = -1;
 	if (!sel)
 		return;
 	struct content c = { 0 };
@@ -313,6 +316,7 @@ static void commit(void)
 
 static void discard(void)
 {
+	release_at = -1;
 	free(sel);
 	sel = NULL;
 	sel_len = 0;
@@ -376,6 +380,7 @@ static void on_primary_data(char *text, size_t len)
 	sel = text;
 	sel_len = len;
 	sel_live = 1;
+	release_at = -1; // live again: a pending clear was a drag step
 	// A paste-over explains only the clearing of the text it pasted over.
 	last_paste_over = -1000000;
 	// No window to compare against: plain select-to-copy.
@@ -383,9 +388,19 @@ static void on_primary_data(char *text, size_t len)
 		commit();
 }
 
+// Primary cleared. Some toolkits clear and immediately re-set it on every
+// step of a drag, so wait a moment: a re-set that extends the text continues
+// the gesture, and only silence is a real release.
 static void on_primary_clear(void)
 {
 	sel_live = 0;
+	if (sel)
+		release_at = now_ms() + RELEASE_GRACE_MS;
+}
+
+static void finish_release(void)
+{
+	release_at = -1;
 	if (!sel)
 		return;
 	if (now_ms() - last_paste_over < PASTE_OVER_WINDOW_MS) {
@@ -617,8 +632,13 @@ int main(void)
 			wl_display_dispatch_pending(display);
 		wl_display_flush(display);
 
+		int timeout = -1;
+		if (release_at >= 0) {
+			long left = release_at - now_ms();
+			timeout = left > 0 ? (int)left : 0;
+		}
 		struct pollfd pf[2] = { { wfd, POLLIN, 0 }, { hypr, POLLIN, 0 } };
-		if (poll(pf, hypr >= 0 ? 2 : 1, -1) < 0 && errno != EINTR) {
+		if (poll(pf, hypr >= 0 ? 2 : 1, timeout) < 0 && errno != EINTR) {
 			wl_display_cancel_read(display);
 			break;
 		}
@@ -631,6 +651,8 @@ int main(void)
 		if (hypr >= 0 && (pf[1].revents & (POLLIN | POLLHUP)) &&
 			hypr_read(hypr, hbuf, &hn, sizeof hbuf) < 0)
 			hypr = -1;
+		if (release_at >= 0 && now_ms() >= release_at)
+			finish_release();
 	}
 	logf_("Wayland connection lost");
 	return 1;
