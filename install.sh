@@ -3,15 +3,24 @@
 set -eu
 cd "$(dirname "$0")"
 
-command -v wl-paste >/dev/null || { echo "wl-clipboard is missing. Install it: sudo pacman -S wl-clipboard" >&2; exit 1; }
+for tool in cc make pkg-config wayland-scanner; do
+	command -v "$tool" >/dev/null || { echo "$tool is missing. Install it: sudo pacman -S base-devel wayland" >&2; exit 1; }
+done
+pkg-config --exists wayland-client || { echo "wayland-client headers are missing. Install them: sudo pacman -S wayland" >&2; exit 1; }
+proto=$(pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null || true)
+[ -f "$proto/staging/ext-data-control/ext-data-control-v1.xml" ] || {
+	echo "wayland-protocols 1.39 or newer is missing. Install it: sudo pacman -S wayland-protocols" >&2
+	exit 1
+}
 [ -n "${WAYLAND_DISPLAY:-}" ] || { echo "No Wayland session found. autocopy needs Wayland." >&2; exit 1; }
 systemctl --user is-active --quiet graphical-session.target || {
 	echo "graphical-session.target is not active. Start your compositor through uwsm or another systemd session manager." >&2
 	exit 1
 }
 
+make
 # install replaces each file rather than writing over it: autocopy-update may be running this.
-install -Dm755 bin/autocopy "$HOME/.local/bin/autocopy"
+install -Dm755 autocopy "$HOME/.local/bin/autocopy"
 install -Dm755 updater/autocopy-update "$HOME/.local/bin/autocopy-update"
 install -Dm644 autocopy.service "$HOME/.config/systemd/user/autocopy.service"
 install -Dm644 updater/autocopy-update.service "$HOME/.config/systemd/user/autocopy-update.service"

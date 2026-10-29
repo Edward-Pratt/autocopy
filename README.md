@@ -2,6 +2,8 @@
 
 Highlight text anywhere and it lands in the clipboard, ready for `Ctrl+V`. Same behavior as Claude Code, for the whole desktop.
 
+Highlighting text to paste over it still works: `Ctrl+V` replaces the highlight with what you copied before, not with the highlight itself.
+
 ## Install
 
 ```sh
@@ -12,8 +14,8 @@ This installs `autocopy`, its systemd user service, and `autocopy-update` with i
 
 Requirements:
 
-- A Wayland compositor that supports the primary selection (Hyprland, Sway, GNOME, KDE). On Hyprland, `misc:middle_click_paste` must be `true`: setting it to `false` turns off the primary selection.
-- `wl-clipboard` (`sudo pacman -S wl-clipboard`)
+- A Wayland compositor with the `ext-data-control-v1` protocol and a primary selection: Hyprland 0.47+, Sway with wlroots 0.19+, KDE Plasma 6.3+. On Hyprland, `misc:middle_click_paste` must be `true`: setting it to `false` turns off the primary selection.
+- A C compiler, `make`, `pkg-config`, `wayland` and `wayland-protocols` 1.39+ (`sudo pacman -S base-devel wayland wayland-protocols`). Hyprland already pulls in the last two.
 - A systemd-managed session, so `graphical-session.target` is active (for example Hyprland started with uwsm)
 
 ## Updates
@@ -28,9 +30,16 @@ It downloads the release from GitHub, checks it against the release's `SHA256SUM
 
 ## How it works
 
-`wl-paste --primary --watch` reports every change to the primary selection (the text you highlight). autocopy copies each new selection into the clipboard with `wl-copy`. A systemd user service runs it with your graphical session.
+autocopy is a small daemon that watches the primary selection (the text you highlight) and owns the clipboard itself, so it sees every paste and decides at that moment what to hand over.
 
-Clicking elsewhere clears the primary selection. autocopy ignores that, so the clipboard keeps the last text you highlighted. Text highlighted in a password field is marked sensitive and is not copied.
+- Highlighting text starts a selection. The clipboard from before it is kept in memory, every type included, so an image or rich text you copied survives.
+- Pasting while the highlight is still live, in the window it was made in, pastes that kept clipboard over the highlight. The highlight is dropped.
+- Anything else ends the selection and makes the highlight the clipboard: clicking elsewhere, pasting it into another window, or highlighting something different.
+- Copying with `Ctrl+C` always wins over a highlight.
+
+Which window has focus comes from Hyprland's IPC socket. On another compositor there is no window check, so every paste pastes the highlight, as a plain select-to-copy tool would.
+
+Text highlighted in a password field is marked sensitive and is not copied. Dragging a selection in an app that does not release the primary selection on mouse press merges the new drag into the previous highlight, so the previous highlight is not kept as the clipboard; most toolkits do release it.
 
 ## Uninstall
 
