@@ -9,7 +9,10 @@
 //     kept (snapshotted into memory, every mime type) and served as before.
 //   - Pasting while the highlight is still live in the window it was made in
 //     is a paste-over: the app gets the pre-gesture clipboard, and the
-//     highlight it replaces is dropped.
+//     highlight it replaces is dropped. Only windows seen releasing the
+//     primary selection get this: in the others (Firefox) a highlight stays
+//     "live" after the user clicks into another field, so a paste there
+//     pastes the highlight.
 //   - Anything else that ends the gesture commits the highlight to the
 //     clipboard: clicking elsewhere (the app clears primary), pasting it into
 //     another window, or starting a different selection.
@@ -36,9 +39,9 @@
 
 #define MAX_BLOB (64u << 20)      // per mime type
 #define RECEIVE_TIMEOUT_MS 1000   // a stalled clipboard owner must not hang us
-#define PASTE_OVER_WINDOW_MS 300  // primary cleared this soon after a paste-over: the app replaced it
 #define OWN_SETTLE_MS 100         // reads this soon after we set the clipboard are watchers, not pastes
 #define RELEASE_GRACE_MS 100      // Chromium clears and re-sets primary on every drag step
+#define MAX_RELEASERS 64
 
 static const char *const text_mimes[] = {
 	"text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT",
@@ -76,10 +79,17 @@ static struct ext_data_control_offer_v1 *cur_offer;
 static char *sel;
 static size_t sel_len;
 static int sel_live;
+static int sel_pasted_over; // pasted over: ending the gesture drops it
 static char sel_window[64];
 static char focused[64];
 
-static long last_paste_over = -1000000;
+// Windows seen releasing the primary selection (a clear with nothing after
+// it). Firefox never does: it keeps primary after the user clicks into
+// another field, so there a live highlight says nothing about what a paste
+// is aimed at.
+static char releasers[MAX_RELEASERS][64];
+static size_t n_releasers;
+
 static long last_own_set = -1000000;
 static long release_at = -1; // when a pending primary clear becomes a release, -1 for none
 
@@ -166,6 +176,23 @@ static int same_window(void)
 	return focused[0] && sel_window[0] && !strcmp(focused, sel_window);
 }
 
+static int releases_primary(const char *window)
+{
+	for (size_t i = 0; i < n_releasers && i < MAX_RELEASERS; i++)
+		if (!strcmp(releasers[i], window))
+			return 1;
+	return 0;
+}
+
+static void add_releaser(const char *window)
+{
+	if (!window[0] || releases_primary(window))
+		return;
+	// Oldest first out: windows come and go over a session.
+	snprintf(releasers[n_releasers++ % MAX_RELEASERS], sizeof *releasers, "%s", window);
+	logf_("%s releases the primary selection: paste-over on", window);
+}
+
 // ---- offers --------------------------------------------------------------
 
 static void offer_mime(void *data, struct ext_data_control_offer_v1 *offer, const char *mime)
@@ -245,9 +272,9 @@ static void source_send(void *data, struct ext_data_control_source_v1 *source, c
 	long t = now_ms();
 
 	if (sel && is_text(mime) && t - last_own_set > OWN_SETTLE_MS) {
-		if (sel_live && same_window()) {
+		if (sel_live && same_window() && releases_primary(sel_window)) {
 			// Paste over the highlight: hand over what was copied before it.
-			last_paste_over = t;
+			sel_pasted_over = 1;
 			logf_("paste-over in %s: serving pre-selection clipboard", focused);
 		} else {
 			// Pasting the highlight somewhere else: it is the clipboard now.
@@ -312,6 +339,7 @@ static void commit(void)
 	sel = NULL;
 	sel_len = 0;
 	sel_live = 0;
+	sel_pasted_over = 0;
 }
 
 static void discard(void)
@@ -321,6 +349,17 @@ static void discard(void)
 	sel = NULL;
 	sel_len = 0;
 	sel_live = 0;
+	sel_pasted_over = 0;
+}
+
+// The gesture is over. A highlight that was pasted over was not meant to be
+// copied; any other was.
+static void end_gesture(void)
+{
+	if (sel_pasted_over)
+		discard();
+	else
+		commit();
 }
 
 // Copy someone else's clipboard into memory and become its owner, so that the
@@ -357,19 +396,14 @@ static void snapshot(void)
 
 static void on_primary_data(char *text, size_t len)
 {
-	long t = now_ms();
 	if (sel) {
 		// Growing or shrinking a drag keeps the gesture. A different text, or
 		// one from another window, is a new selection: the old one was made
 		// to be copied, unless it was just pasted over.
 		int extends = same_window() &&
 			(memmem(text, len, sel, sel_len) || memmem(sel, sel_len, text, len));
-		if (!extends) {
-			if (t - last_paste_over < PASTE_OVER_WINDOW_MS)
-				discard();
-			else
-				commit();
-		}
+		if (!extends)
+			end_gesture();
 	}
 	if (!sel) {
 		if (!clip_source && focused[0])
@@ -381,8 +415,8 @@ static void on_primary_data(char *text, size_t len)
 	sel_len = len;
 	sel_live = 1;
 	release_at = -1; // live again: a pending clear was a drag step
-	// A paste-over explains only the clearing of the text it pasted over.
-	last_paste_over = -1000000;
+	// A paste-over is about the text it pasted over, not this one.
+	sel_pasted_over = 0;
 	// No window to compare against: plain select-to-copy.
 	if (!focused[0])
 		commit();
@@ -403,13 +437,12 @@ static void finish_release(void)
 	release_at = -1;
 	if (!sel)
 		return;
-	if (now_ms() - last_paste_over < PASTE_OVER_WINDOW_MS) {
-		logf_("selection replaced by paste: dropped");
-		discard();
-	} else {
-		logf_("selection released: copied");
-		commit();
-	}
+	// The window that made the highlight let go of it with nothing after:
+	// its highlights are live only while they are really highlighted.
+	if (same_window())
+		add_releaser(sel_window);
+	logf_(sel_pasted_over ? "selection replaced by paste: dropped" : "selection released: copied");
+	end_gesture();
 }
 
 // ---- device --------------------------------------------------------------
@@ -584,8 +617,9 @@ static int hypr_read(int fd, char *buf, size_t *n, size_t cap)
 			// Committing now offers only text, so an app that prefers an image or
 			// HTML type does not get the old clipboard instead.
 			if (sel && focused[0] && strcmp(focused, sel_window)) {
-				logf_("focus moved to %s: selection copied", focused);
-				commit();
+				logf_(sel_pasted_over ? "focus moved to %s: pasted-over selection dropped"
+					: "focus moved to %s: selection copied", focused);
+				end_gesture();
 			}
 		}
 		line = nl + 1;

@@ -33,9 +33,11 @@ It downloads the release from GitHub, checks it against the release's `SHA256SUM
 autocopy is a small daemon that watches the primary selection (the text you highlight) and owns the clipboard itself, so it sees every paste and decides at that moment what to hand over.
 
 - Highlighting text starts a selection. The clipboard from before it is kept in memory, every type included, so an image or rich text you copied survives.
-- Pasting while the highlight is still live, in the window it was made in, pastes that kept clipboard over the highlight. The highlight is dropped.
+- Pasting while the highlight is still live, in the window it was made in, pastes that kept clipboard over the highlight. The highlight is dropped, even if you then move to another window.
 - Anything else ends the selection and makes the highlight the clipboard: clicking elsewhere, pasting it into another window, or highlighting something different.
 - Copying with `Ctrl+C` always wins over a highlight.
+
+Paste-over only happens in a window that has been seen letting go of a highlight, for example when you click elsewhere in VS Code. Some apps, Firefox among them, keep the highlight as the primary selection after you click into another field. There a highlight never looks finished, so `Ctrl+V` always pastes the highlight. A new window gets paste-over once it has let go of a highlight for the first time.
 
 Which window has focus comes from Hyprland's IPC socket. On another compositor there is no window check, so every paste pastes the highlight, as a plain select-to-copy tool would.
 
