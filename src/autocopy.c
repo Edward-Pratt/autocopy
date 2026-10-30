@@ -9,10 +9,10 @@
 //     kept (snapshotted into memory, every mime type) and served as before.
 //   - Pasting while the highlight is still live in the window it was made in
 //     is a paste-over: the app gets the pre-gesture clipboard, and the
-//     highlight it replaces is dropped. Only windows seen releasing the
+//     highlight it replaces is dropped. Only apps seen releasing the
 //     primary selection get this: in the others (Firefox) a highlight stays
 //     "live" after the user clicks into another field, so a paste there
-//     pastes the highlight.
+//     pastes the highlight. What was learned is kept across restarts.
 //   - Anything else that ends the gesture commits the highlight to the
 //     clipboard: clicking elsewhere (the app clears primary), pasting it into
 //     another window, or starting a different selection.
@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -41,7 +42,7 @@
 #define RECEIVE_TIMEOUT_MS 1000   // a stalled clipboard owner must not hang us
 #define OWN_SETTLE_MS 100         // reads this soon after we set the clipboard are watchers, not pastes
 #define RELEASE_GRACE_MS 100      // Chromium clears and re-sets primary on every drag step
-#define MAX_RELEASERS 64
+#define MAX_RELEASERS 256
 
 static const char *const text_mimes[] = {
 	"text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT",
@@ -81,14 +82,17 @@ static size_t sel_len;
 static int sel_live;
 static int sel_pasted_over; // pasted over: ending the gesture drops it
 static char sel_window[64];
+static char sel_class[128];
 static char focused[64];
+static char focused_class[128];
 
-// Windows seen releasing the primary selection (a clear with nothing after
-// it). Firefox never does: it keeps primary after the user clicks into
-// another field, so there a live highlight says nothing about what a paste
-// is aimed at.
-static char releasers[MAX_RELEASERS][64];
+// Window classes seen releasing the primary selection (a clear with nothing
+// after it), saved to releasers_path. Firefox never does: it keeps primary
+// after the user clicks into another field, so there a live highlight says
+// nothing about what a paste is aimed at.
+static char releasers[MAX_RELEASERS][128];
 static size_t n_releasers;
+static char releasers_path[4096];
 
 static long last_own_set = -1000000;
 static long release_at = -1; // when a pending primary clear becomes a release, -1 for none
@@ -176,21 +180,64 @@ static int same_window(void)
 	return focused[0] && sel_window[0] && !strcmp(focused, sel_window);
 }
 
-static int releases_primary(const char *window)
+static int releases_primary(const char *class)
 {
-	for (size_t i = 0; i < n_releasers && i < MAX_RELEASERS; i++)
-		if (!strcmp(releasers[i], window))
+	for (size_t i = 0; i < n_releasers; i++)
+		if (!strcmp(releasers[i], class))
 			return 1;
 	return 0;
 }
 
-static void add_releaser(const char *window)
+static int remember_releaser(const char *class)
 {
-	if (!window[0] || releases_primary(window))
+	if (!class[0] || n_releasers == MAX_RELEASERS || releases_primary(class))
+		return 0;
+	snprintf(releasers[n_releasers++], sizeof *releasers, "%s", class);
+	return 1;
+}
+
+// $XDG_STATE_HOME/autocopy/releasers, one class per line.
+static void load_releasers(void)
+{
+	const char *state = getenv("XDG_STATE_HOME"), *home = getenv("HOME");
+	if (state && *state)
+		snprintf(releasers_path, sizeof releasers_path, "%s/autocopy/releasers", state);
+	else if (home)
+		snprintf(releasers_path, sizeof releasers_path, "%s/.local/state/autocopy/releasers", home);
+	FILE *f = releasers_path[0] ? fopen(releasers_path, "r") : NULL;
+	if (!f)
 		return;
-	// Oldest first out: windows come and go over a session.
-	snprintf(releasers[n_releasers++ % MAX_RELEASERS], sizeof *releasers, "%s", window);
-	logf_("%s releases the primary selection: paste-over on", window);
+	char line[sizeof *releasers];
+	while (fgets(line, sizeof line, f)) {
+		line[strcspn(line, "\n")] = 0;
+		remember_releaser(line);
+	}
+	fclose(f);
+}
+
+static void add_releaser(const char *class)
+{
+	if (!remember_releaser(class))
+		return;
+	logf_("%s releases the primary selection: paste-over on", class);
+	if (!releasers_path[0])
+		return;
+	// mkdir -p for the two directories that may be missing.
+	char dir[sizeof releasers_path];
+	snprintf(dir, sizeof dir, "%s", releasers_path);
+	*strrchr(dir, '/') = 0;
+	char *up = strrchr(dir, '/');
+	*up = 0;
+	mkdir(dir, 0755);
+	*up = '/';
+	mkdir(dir, 0755);
+	FILE *f = fopen(releasers_path, "a");
+	if (!f) {
+		logf_("cannot save %s: %s", releasers_path, strerror(errno));
+		return;
+	}
+	fprintf(f, "%s\n", class);
+	fclose(f);
 }
 
 // ---- offers --------------------------------------------------------------
@@ -272,7 +319,7 @@ static void source_send(void *data, struct ext_data_control_source_v1 *source, c
 	long t = now_ms();
 
 	if (sel && is_text(mime) && t - last_own_set > OWN_SETTLE_MS) {
-		if (sel_live && same_window() && releases_primary(sel_window)) {
+		if (sel_live && same_window() && releases_primary(sel_class)) {
 			// Paste over the highlight: hand over what was copied before it.
 			sel_pasted_over = 1;
 			logf_("paste-over in %s: serving pre-selection clipboard", focused);
@@ -409,6 +456,7 @@ static void on_primary_data(char *text, size_t len)
 		if (!clip_source && focused[0])
 			snapshot();
 		snprintf(sel_window, sizeof sel_window, "%s", focused);
+		snprintf(sel_class, sizeof sel_class, "%s", focused_class);
 	}
 	free(sel);
 	sel = text;
@@ -440,7 +488,7 @@ static void finish_release(void)
 	// The window that made the highlight let go of it with nothing after:
 	// its highlights are live only while they are really highlighted.
 	if (same_window())
-		add_releaser(sel_window);
+		add_releaser(sel_class);
 	logf_(sel_pasted_over ? "selection replaced by paste: dropped" : "selection released: copied");
 	end_gesture();
 }
@@ -542,16 +590,17 @@ static const struct wl_registry_listener registry_listener = {
 
 // ---- Hyprland focus ------------------------------------------------------
 
+// Copy one field of an IPC event or JSON reply, up to its delimiter.
+static void copy_field(char *dst, size_t cap, const char *src)
+{
+	snprintf(dst, cap, "%.*s", (int)strcspn(src, ",\n\""), src);
+}
+
 static void set_focused(const char *addr)
 {
 	if (!strncmp(addr, "0x", 2))
 		addr += 2;
-	snprintf(focused, sizeof focused, "%s", addr);
-	for (char *p = focused; *p; p++)
-		if (*p == ',' || *p == '\n' || *p == '"') {
-			*p = 0;
-			break;
-		}
+	copy_field(focused, sizeof focused, addr);
 }
 
 static int hypr_socket(const char *name)
@@ -592,6 +641,8 @@ static int hypr_connect(void)
 		char *p = strstr(buf, "\"address\": \"");
 		if (p)
 			set_focused(p + strlen("\"address\": \""));
+		if ((p = strstr(buf, "\"class\": \"")))
+			copy_field(focused_class, sizeof focused_class, p + strlen("\"class\": \""));
 	}
 	close(fd);
 	return hypr_socket(".socket2.sock");
@@ -611,6 +662,9 @@ static int hypr_read(int fd, char *buf, size_t *n, size_t cap)
 	char *line = buf, *nl;
 	while ((nl = strchr(line, '\n'))) {
 		*nl = 0;
+		// activewindow (class,title) comes just before activewindowv2.
+		if (!strncmp(line, "activewindow>>", 14))
+			copy_field(focused_class, sizeof focused_class, line + 14);
 		if (!strncmp(line, "activewindowv2>>", 16)) {
 			set_focused(line + 16);
 			// Leaving the highlight's window: it was made to be pasted elsewhere.
@@ -652,6 +706,7 @@ int main(void)
 	device = ext_data_control_manager_v1_get_data_device(manager, seat);
 	ext_data_control_device_v1_add_listener(device, &device_listener, NULL);
 
+	load_releasers();
 	int hypr = hypr_connect();
 	if (hypr < 0)
 		logf_("no Hyprland IPC: every paste commits the highlight");
