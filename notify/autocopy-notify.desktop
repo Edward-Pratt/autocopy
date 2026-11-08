@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Autocopy notifications on/off
+Comment=Show a notification each time a highlight is copied
+Keywords=autocopy;clipboard;copy;notification;
+Icon=edit-copy
+Exec=@BINDIR@/autocopy-notify toggle
+Terminal=false
+Categories=Utility;

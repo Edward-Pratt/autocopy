@@ -7,6 +7,7 @@
 
 #include "log.h"
 #include "releasers.h"
+#include "xdg.h"
 
 #define MAX_RELEASERS 256
 
@@ -26,9 +27,18 @@ int releases_primary(const char *class)
 	return 0;
 }
 
+// Firefox (any build: firefox-esr, org.mozilla.firefox) keeps primary after a
+// click elsewhere, yet it was once seen clearing it with nothing after, cause
+// unknown. One such clear must not turn paste-over on for good, so it is never
+// learned, and a line for it in the file is ignored.
+static int keeps_primary(const char *class)
+{
+	return strcasestr(class, "firefox") != NULL;
+}
+
 static int remember_releaser(const char *class)
 {
-	if (!class[0] || n_releasers == MAX_RELEASERS || releases_primary(class))
+	if (!class[0] || n_releasers == MAX_RELEASERS || releases_primary(class) || keeps_primary(class))
 		return 0;
 	snprintf(releasers[n_releasers++], sizeof *releasers, "%s", class);
 	return 1;
@@ -37,11 +47,7 @@ static int remember_releaser(const char *class)
 // $XDG_STATE_HOME/autocopy/releasers, one class per line.
 void load_releasers(void)
 {
-	const char *state = getenv("XDG_STATE_HOME"), *home = getenv("HOME");
-	if (state && *state)
-		snprintf(releasers_path, sizeof releasers_path, "%s/autocopy/releasers", state);
-	else if (home)
-		snprintf(releasers_path, sizeof releasers_path, "%s/.local/state/autocopy/releasers", home);
+	xdg_path(releasers_path, sizeof releasers_path, "XDG_STATE_HOME", ".local/state", "autocopy/releasers");
 	FILE *f = releasers_path[0] ? fopen(releasers_path, "r") : NULL;
 	if (!f)
 		return;
@@ -55,6 +61,11 @@ void load_releasers(void)
 
 void add_releaser(const char *class)
 {
+	if (keeps_primary(class)) {
+		// Logged so the cause of these rare clears can be found.
+		logf_("%s let go of the primary selection, but it keeps highlights: paste-over stays off", class);
+		return;
+	}
 	if (!remember_releaser(class))
 		return;
 	logf_("%s releases the primary selection: paste-over on", class);

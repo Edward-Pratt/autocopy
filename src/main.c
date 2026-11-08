@@ -8,6 +8,7 @@
 #include <wayland-client.h>
 
 #include "autocopy.h"
+#include "device.h"
 #include "ext-data-control-v1-client-protocol.h"
 #include "hypr.h"
 #include "log.h"
@@ -95,7 +96,7 @@ int main(void)
 		logf_("compositor lacks ext-data-control-v1 (need Hyprland 0.47+, Sway with wlroots 0.19+)");
 		return 1;
 	}
-	autocopy_start(display, manager, seat);
+	device_start(display, manager, seat);
 
 	load_releasers();
 	int hypr = hypr_connect();

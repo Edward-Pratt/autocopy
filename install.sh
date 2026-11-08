@@ -22,6 +22,11 @@ make
 # install replaces each file rather than writing over it: autocopy-update may be running this.
 install -Dm755 autocopy "$HOME/.local/bin/autocopy"
 install -Dm755 updater/autocopy-update "$HOME/.local/bin/autocopy-update"
+install -Dm755 notify/autocopy-notify "$HOME/.local/bin/autocopy-notify"
+# Launchers don't always have ~/.local/bin on PATH, so the entry names the script by its full path.
+apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+mkdir -p "$apps"
+sed "s|@BINDIR@|$HOME/.local/bin|" notify/autocopy-notify.desktop >"$apps/autocopy-notify.desktop"
 install -Dm644 autocopy.service "$HOME/.config/systemd/user/autocopy.service"
 install -Dm644 updater/autocopy-update.service "$HOME/.config/systemd/user/autocopy-update.service"
 install -Dm644 updater/autocopy-update.timer "$HOME/.config/systemd/user/autocopy-update.timer"

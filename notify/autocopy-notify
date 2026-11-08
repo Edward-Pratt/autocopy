@@ -1,0 +1,33 @@
+#!/bin/sh
+# Turns autocopy's copy notifications on or off. They are on while the flag file exists; the daemon checks it on
+# every copy, so a change needs no restart. The launcher entry runs `autocopy-notify toggle`.
+#
+#   autocopy-notify            say whether they are on
+#   autocopy-notify on|off|toggle
+set -eu
+flag=${XDG_CONFIG_HOME:-$HOME/.config}/autocopy/notify
+
+state() { if [ -e "$flag" ]; then echo on; else echo off; fi; }
+on() { mkdir -p "$(dirname "$flag")" && : >"$flag"; }
+
+case ${1:-status} in
+on) on ;;
+off) rm -f "$flag" ;;
+toggle) if [ -e "$flag" ]; then rm -f "$flag"; else on; fi ;;
+status)
+	echo "Copy notifications are $(state)."
+	exit 0
+	;;
+*)
+	echo "usage: autocopy-notify [on|off|toggle]" >&2
+	exit 2
+	;;
+esac
+
+msg="Copy notifications $(state)"
+echo "$msg"
+# Run from a launcher there is no terminal, so the desktop is where this is seen.
+if command -v notify-send >/dev/null; then
+	notify-send --app-name=autocopy --urgency=low --transient --expire-time=1500 \
+		--hint=string:x-canonical-private-synchronous:autocopy "$msg" || true
+fi
