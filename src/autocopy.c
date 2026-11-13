@@ -34,6 +34,7 @@
 #include "clipboard.h"
 #include "content.h"
 #include "discord.h"
+#include "drag.h"
 #include "hypr.h"
 #include "log.h"
 #include "notify.h"
@@ -133,6 +134,19 @@ void autocopy_paste(const char *mime, int fd)
 
 // ---- gesture logic -------------------------------------------------------
 
+// Growing or shrinking a drag keeps the gesture. A different text, or one
+// from another window, is a new selection: the old one was made to be
+// copied, unless it was just pasted over. In Discord a click on a word
+// inside the old highlight must not count, so a drag has to keep one end.
+static int continues_gesture(const char *text, size_t len)
+{
+	if (!sel || !same_window())
+		return 0;
+	if (is_discord(sel_class))
+		return drag_continues(text, len, sel, sel_len);
+	return memmem(text, len, sel, sel_len) || memmem(sel, sel_len, text, len);
+}
+
 void autocopy_primary(char *text, size_t len)
 {
 	len = strip_discord_toolbar(focused_class, text, len);
@@ -143,17 +157,19 @@ void autocopy_primary(char *text, size_t len)
 		free(text);
 		return;
 	}
+	int extends = continues_gesture(text, len);
+	// In Discord a click can highlight hidden text, so a new highlight
+	// counts only once it changes, as a drag's does.
+	if (!extends && is_discord(focused_class) && !drag_started(text, len, focused)) {
+		release_at = -1; // primary was re-set, so a clear just before was no release
+		if (getenv("AUTOCOPY_DEBUG"))
+			logf_("highlight in %s held: copied only if a drag changes it", focused_class);
+		return;
+	}
 	int fresh = !sel;
-	if (sel) {
-		// Growing or shrinking a drag keeps the gesture. A different text, or
-		// one from another window, is a new selection: the old one was made
-		// to be copied, unless it was just pasted over.
-		int extends = same_window() &&
-			(memmem(text, len, sel, sel_len) || memmem(sel, sel_len, text, len));
-		if (!extends) {
-			end_gesture();
-			fresh = 1;
-		}
+	if (sel && !extends) {
+		end_gesture();
+		fresh = 1;
 	}
 	if (fresh) {
 		if (!clipboard_owned() && focused[0] && releases_primary(focused_class))

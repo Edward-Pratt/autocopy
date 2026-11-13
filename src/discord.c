@@ -21,7 +21,7 @@ struct line {
 };
 
 // Discord itself, or a client built on it: Vesktop, Equibop.
-static int is_discord(const char *class)
+int is_discord(const char *class)
 {
 	return strcasestr(class, "discord") || strcasestr(class, "vesktop") ||
 		strcasestr(class, "equibop");
