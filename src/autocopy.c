@@ -33,6 +33,7 @@
 #include "autocopy.h"
 #include "clipboard.h"
 #include "content.h"
+#include "discord.h"
 #include "hypr.h"
 #include "log.h"
 #include "notify.h"
@@ -134,6 +135,14 @@ void autocopy_paste(const char *mime, int fd)
 
 void autocopy_primary(char *text, size_t len)
 {
+	len = strip_discord_toolbar(focused_class, text, len);
+	if (!len) {
+		// Only Discord's toolbar was highlighted: nothing to copy.
+		logf_("highlight of Discord's message toolbar: ignored");
+		release_at = -1; // primary was re-set, so a clear just before was no release
+		free(text);
+		return;
+	}
 	int fresh = !sel;
 	if (sel) {
 		// Growing or shrinking a drag keeps the gesture. A different text, or

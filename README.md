@@ -56,6 +56,8 @@ Paste-over only happens in an app that has been seen letting go of a highlight, 
 
 Which window has focus comes from Hyprland's IPC socket. On another compositor there is no window check, so every paste pastes the highlight, as a plain select-to-copy tool would.
 
+In Discord, Vesktop and Equibop, double-clicking a message to reply also highlights the toolbar that shows on hover, and its hidden labels ("Click to react", "Add Reaction", "Reply" and so on) come out as text. autocopy drops those lines, and a highlight of only the toolbar is not copied, so the clipboard stays as it was. This needs Hyprland, to know the highlight was made in Discord, and the labels are matched in English only; otherwise the toolbar text is still copied. A double-click that lands on a word still copies that word, as any double-click does.
+
 Text highlighted in a password field is marked sensitive and is not copied, and a password manager's clipboard is left with the manager so its own clearing keeps working. Launchers and other overlays are not windows, so highlighting text in an app with paste-over and pasting it into one counts as pasting in the same window: the paste gives the previous clipboard, not the highlight. Text highlighted before autocopy starts is not copied. Dragging a selection in an app that does not release the primary selection on mouse press merges the new drag into the previous highlight, so the previous highlight is not kept as the clipboard; most toolkits do release it.
 
 ## Uninstall
