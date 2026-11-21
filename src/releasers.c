@@ -19,12 +19,34 @@ static char releasers[MAX_RELEASERS][128];
 static size_t n_releasers;
 static char releasers_path[4096];
 
-int releases_primary(const char *class)
+// VS Code keeps primary after a click or an arrow key, like Firefox, so it is
+// never learned. Its users paste over highlights all the time, so it gets
+// paste-over by rule: Ctrl+V in the window a highlight was made in pastes the
+// clipboard from before it, even after a click elsewhere. Middle-click and
+// Ctrl+C still move a highlight within it, and leaving it copies the highlight.
+static const char *const paste_over_classes[] = {
+	"com.microsoft.VSCode", "code", "Code", "code-oss", "codium", "VSCodium",
+};
+
+static int pastes_over(const char *class)
+{
+	for (size_t i = 0; i < sizeof paste_over_classes / sizeof *paste_over_classes; i++)
+		if (!strcmp(paste_over_classes[i], class))
+			return 1;
+	return 0;
+}
+
+static int learned(const char *class)
 {
 	for (size_t i = 0; i < n_releasers; i++)
 		if (!strcmp(releasers[i], class))
 			return 1;
 	return 0;
+}
+
+int releases_primary(const char *class)
+{
+	return pastes_over(class) || learned(class);
 }
 
 // Firefox (any build: firefox-esr, org.mozilla.firefox) keeps primary after a
