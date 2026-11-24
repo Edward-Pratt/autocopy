@@ -45,7 +45,6 @@ int button_start(void)
 	return fd;
 }
 
-// Returns 0 to go on, -1 when told to stop.
 int button_read(int fd)
 {
 	struct signalfd_siginfo si;
@@ -55,4 +54,13 @@ int button_read(int fd)
 		autocopy_button_released();
 	}
 	return 0;
+}
+
+void button_child(void)
+{
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGTERM);
+	sigaddset(&set, SIGINT);
+	sigprocmask(SIG_UNBLOCK, &set, NULL);
 }

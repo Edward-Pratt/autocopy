@@ -45,12 +45,9 @@ static const struct wl_registry_listener registry_listener = {
 
 // ---- main ----------------------------------------------------------------
 
-static int run(struct wl_display *display, int hypr)
+static int run(struct wl_display *display, int hypr, int sfd)
 {
 	int wfd = wl_display_get_fd(display);
-	int sfd = button_start();
-	if (sfd < 0)
-		logf_("no signalfd: the mouse button release does not copy");
 	for (;;) {
 		while (wl_display_prepare_read(display) != 0)
 			wl_display_dispatch_pending(display);
@@ -92,6 +89,10 @@ int main(void)
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGCHLD, SIG_IGN);
 	setvbuf(stderr, NULL, _IOLBF, 0);
+	// First, so a button release during startup is not fatal.
+	int sfd = button_start();
+	if (sfd < 0)
+		logf_("no signalfd: the mouse button release does not copy");
 
 	struct wl_display *display = wl_display_connect(NULL);
 	if (!display) {
@@ -113,5 +114,5 @@ int main(void)
 		logf_("no Hyprland IPC: every paste commits the highlight");
 	else
 		logf_("watching selections; focused window %s", focused[0] ? focused : "(none)");
-	return run(display, hypr);
+	return run(display, hypr, sfd);
 }

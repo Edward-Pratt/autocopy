@@ -7,5 +7,8 @@
 int button_start(void);
 // Handle pending signals. Returns 0 to go on, -1 when told to stop.
 int button_read(int fd);
+// In a forked child that stays autocopy: SIGTERM and SIGINT stop it again.
+// SIGUSR1 stays blocked, since the bind's pkill reaches it too.
+void button_child(void);
 
 #endif

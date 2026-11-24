@@ -15,11 +15,6 @@ void clipboard_own(struct content *c);
 void clipboard_snapshot(void);
 // Hand a paste request what we hold, as mime.
 void clipboard_send(const char *mime, int fd);
-// Before copying a highlight over the clipboard: keep what it holds now.
-void clipboard_keep(void);
-// Make the kept clipboard the clipboard again (empty it if none was kept).
-void clipboard_restore_kept(void);
-void clipboard_drop_kept(void);
 int clipboard_owned(void);
 // Whether a read now is a paste rather than a watcher reacting to our set.
 int clipboard_settled(void);

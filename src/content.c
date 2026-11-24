@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "button.h"
 #include "content.h"
 
 const char *const text_mimes[N_TEXT_MIMES] = {
@@ -55,6 +56,7 @@ void write_blob(int fd, const char *data, size_t len)
 {
 	pid_t pid = fork();
 	if (pid == 0) {
+		button_child();
 		while (len) {
 			ssize_t k = write(fd, data, len);
 			if (k <= 0)

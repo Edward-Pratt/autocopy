@@ -16,7 +16,7 @@ src/ext-data-control-v1-client-protocol.h: $(PROTO)
 src/ext-data-control-v1-protocol.c: $(PROTO)
 	wayland-scanner private-code $< $@
 
-TESTS := tests/discord_test tests/drag_test
+TESTS := tests/discord_test tests/drag_test tests/button_test
 
 check: $(TESTS)
 	for t in $(TESTS); do ./$$t || exit 1; done
@@ -26,6 +26,9 @@ tests/discord_test: tests/discord_test.c src/discord.c src/discord.h
 
 tests/drag_test: tests/drag_test.c src/drag.c src/drag.h
 	$(CC) $(CFLAGS) -Isrc -o $@ tests/drag_test.c src/drag.c
+
+tests/button_test: tests/button_test.c src/autocopy.c src/discord.c src/drag.c $(wildcard src/*.h) $(GEN)
+	$(CC) $(CFLAGS) -Isrc -o $@ tests/button_test.c src/autocopy.c src/discord.c src/drag.c
 
 clean:
 	rm -f autocopy $(TESTS) $(GEN)

@@ -22,10 +22,11 @@
 //   - Anything else that ends the gesture commits the highlight to the
 //     clipboard: clicking elsewhere (the app clears primary), pasting it into
 //     another window, or starting a different selection.
-//   - Letting go of the mouse button that made the highlight copies it right
-//     away (autocopy_button_released, sent by the compositor's bind). In an
-//     app with paste-over the clipboard from before is kept aside, and a
-//     paste over the highlight gets it and makes it the clipboard again.
+//   - In apps without paste-over, letting go of the mouse button that made the
+//     highlight copies it right away (autocopy_button_released, sent by the
+//     compositor's bind). Apps with paste-over wait for the gesture to end:
+//     the clipboard must keep every type of what was copied before, and a
+//     paste over the highlight could only ask for the highlight's text types.
 //
 // Window identity comes from Hyprland's IPC sockets. Without them every paste
 // commits the highlight, which is plain "select to copy" behaviour.
@@ -55,7 +56,6 @@ static int sel_live;
 static int sel_pasted_over; // pasted over: ending the gesture drops it
 static int sel_owned;       // the clipboard holds exactly this text
 static int sel_announced;   // the notification for this text is out
-static int sel_copied;      // a button release copied it over a kept clipboard
 static char sel_window[64];
 static char sel_class[128];
 
@@ -103,8 +103,6 @@ static void discard(void)
 	sel_pasted_over = 0;
 	sel_owned = 0;
 	sel_announced = 0;
-	sel_copied = 0;
-	clipboard_drop_kept();
 }
 
 // The gesture is over. A highlight that was pasted over was not meant to be
@@ -122,18 +120,12 @@ void autocopy_paste(const char *mime, int fd)
 {
 	if (getenv("AUTOCOPY_DEBUG"))
 		logf_("paste asks for %s in %s", mime, focused);
-	if (sel && is_text(mime) && clipboard_settled()) {
+	if (sel && !sel_owned && is_text(mime) && clipboard_settled()) {
 		if (sel_live && same_window() && releases_primary(sel_class)) {
 			// Paste over the highlight: hand over what was copied before it.
 			sel_pasted_over = 1;
-			if (sel_copied) {
-				// The button release copied it: bring the kept clipboard back.
-				clipboard_restore_kept();
-				sel_copied = 0;
-				sel_owned = 0;
-			}
 			logf_("paste-over in %s: serving pre-selection clipboard", focused);
-		} else if (!sel_owned) {
+		} else {
 			// Pasting the highlight somewhere else: it is the clipboard now.
 			logf_("paste of selection in %s: committing", focused);
 			write_blob(fd, sel, sel_len);
@@ -262,18 +254,14 @@ void autocopy_button_released(void)
 	button_at = now_ms() + BUTTON_SETTLE_MS;
 }
 
-// A highlight the button just finished is copied now, once.
+// A highlight the button just finished is copied now, once. Not in an app
+// with paste-over: there the clipboard from before stays until the gesture
+// ends, so a paste over the highlight gets it with all its types.
 static void finish_button(void)
 {
 	button_at = -1;
-	if (!sel || !sel_live || !same_window() || sel_announced)
+	if (!sel || !sel_live || !same_window() || sel_announced || releases_primary(sel_class))
 		return;
-	// In an app with paste-over, keep the clipboard from before the
-	// highlight, once per gesture: later copies would keep the highlight.
-	if (releases_primary(sel_class) && !sel_copied) {
-		clipboard_keep();
-		sel_copied = 1;
-	}
 	logf_("button released in %s: selection copied", focused);
 	announce();
 }
