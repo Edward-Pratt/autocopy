@@ -4,7 +4,10 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/signalfd.h>
+#include <unistd.h>
 #include <wayland-client.h>
 
 #include "autocopy.h"
@@ -13,6 +16,7 @@
 #include "hypr.h"
 #include "log.h"
 #include "releasers.h"
+#include "xdg.h"
 
 static struct wl_seat *seat;
 static struct ext_data_control_manager_v1 *manager;
@@ -44,9 +48,61 @@ static const struct wl_registry_listener registry_listener = {
 
 // ---- main ----------------------------------------------------------------
 
+// ---- mouse button --------------------------------------------------------
+
+// Wayland does not tell other clients about mouse buttons, so the compositor
+// does: a bind on the button's release sends SIGUSR1. The flag file says this
+// autocopy understands it (to anything else SIGUSR1 is fatal), and goes when
+// it exits.
+static char button_flag[4096];
+
+static void remove_button_flag(void)
+{
+	unlink(button_flag);
+}
+
+static int button_start(void)
+{
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGUSR1);
+	sigaddset(&set, SIGTERM);
+	sigaddset(&set, SIGINT);
+	if (sigprocmask(SIG_BLOCK, &set, NULL) < 0)
+		return -1;
+	int fd = signalfd(-1, &set, SFD_NONBLOCK | SFD_CLOEXEC);
+	if (fd < 0) {
+		sigprocmask(SIG_UNBLOCK, &set, NULL);
+		return -1;
+	}
+	if (xdg_path(button_flag, sizeof button_flag, "XDG_RUNTIME_DIR", ".cache", "autocopy.button")) {
+		FILE *f = fopen(button_flag, "w");
+		if (f) {
+			fclose(f);
+			atexit(remove_button_flag);
+		}
+	}
+	return fd;
+}
+
+// Returns 0 to go on, -1 when told to stop.
+static int button_read(int fd)
+{
+	struct signalfd_siginfo si;
+	while (read(fd, &si, sizeof si) == sizeof si) {
+		if (si.ssi_signo != SIGUSR1)
+			return -1;
+		autocopy_button_released();
+	}
+	return 0;
+}
+
 static int run(struct wl_display *display, int hypr)
 {
 	int wfd = wl_display_get_fd(display);
+	int sfd = button_start();
+	if (sfd < 0)
+		logf_("no signalfd: the mouse button release does not copy");
 	for (;;) {
 		while (wl_display_prepare_read(display) != 0)
 			wl_display_dispatch_pending(display);
@@ -58,8 +114,9 @@ static int run(struct wl_display *display, int hypr)
 			long left = deadline - now_ms();
 			timeout = left > 0 ? (int)left : 0;
 		}
-		struct pollfd pf[2] = { { wfd, POLLIN, 0 }, { hypr, POLLIN, 0 } };
-		if (poll(pf, hypr >= 0 ? 2 : 1, timeout) < 0 && errno != EINTR) {
+		// A negative fd is skipped by poll.
+		struct pollfd pf[3] = { { wfd, POLLIN, 0 }, { hypr, POLLIN, 0 }, { sfd, POLLIN, 0 } };
+		if (poll(pf, 3, timeout) < 0 && errno != EINTR) {
 			wl_display_cancel_read(display);
 			break;
 		}
@@ -72,6 +129,10 @@ static int run(struct wl_display *display, int hypr)
 		if (hypr >= 0 && (pf[1].revents & (POLLIN | POLLHUP)) &&
 			hypr_read(hypr, autocopy_focus_changed) < 0)
 			hypr = -1;
+		if (sfd >= 0 && (pf[2].revents & POLLIN) && button_read(sfd) < 0) {
+			logf_("stopping");
+			return 0;
+		}
 		autocopy_tick();
 	}
 	logf_("Wayland connection lost");

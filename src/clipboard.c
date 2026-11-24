@@ -18,6 +18,9 @@ static void (*paste_handler)(const char *mime, int fd);
 // compositor last announced as the clipboard, ours or someone else's.
 static struct content clip;
 static struct ext_data_control_source_v1 *clip_source;
+// The clipboard from before a highlight was copied over it, so a paste-over
+// can still get it. Empty when there is none, or it was not ours to keep.
+static struct content kept;
 static struct ext_data_control_offer_v1 *cur_offer;
 
 static long last_own_set = -1000000;
@@ -108,6 +111,35 @@ void clipboard_send(const char *mime, int fd)
 		write_blob(fd, b->data, b->len);
 	else
 		close(fd);
+}
+
+void clipboard_keep(void)
+{
+	free_content(&kept);
+	if (!clip_source)
+		return;
+	kept = clip;
+	clip.b = NULL;
+	clip.n = 0;
+}
+
+void clipboard_restore_kept(void)
+{
+	if (kept.n) {
+		clipboard_own(&kept);
+		return;
+	}
+	// Nothing was kept: the clipboard was empty or not ours, so empty it.
+	clip_source = NULL; // its cancelled event then only destroys it
+	free_content(&clip);
+	last_own_set = now_ms();
+	ext_data_control_device_v1_set_selection(device, NULL);
+	wl_display_flush(display);
+}
+
+void clipboard_drop_kept(void)
+{
+	free_content(&kept);
 }
 
 int clipboard_owned(void)
