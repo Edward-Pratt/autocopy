@@ -38,9 +38,37 @@ autocopy-notify on        # or off, or toggle; with no argument it says which
 
 The setting is the file `~/.config/autocopy/notify`: notifications are on while it exists. A change counts from the next copy, and updates keep it.
 
-The notification shows the first 80 characters of the copied text on one line. Each highlight is copied once, when it is over, so a drag that pauses does not copy or notify part-way. In apps with paste-over (see [How it works](#how-it-works)) that is when you click elsewhere, switch windows, paste it, or highlight something else. Apps without paste-over, Firefox and Discord among them, keep a highlight after a click, so there it is when you switch windows, paste it, or highlight something else; a paste always gets the whole highlight. Pasting over a highlight copies nothing, so it shows nothing, and `Ctrl+C` copies are the app's own. Notifications are transient, so they stay out of the notification history, but they are on screen, screen shares included.
+The notification shows the first 80 characters of the copied text on one line. Each highlight is copied once, when it is over, so a drag that pauses does not copy or notify part-way. With the mouse button bind (see [Copy on mouse release](#copy-on-mouse-release)) that is when you let go of the button. Without it, in apps with paste-over (see [How it works](#how-it-works)) that is when you click elsewhere, switch windows, paste it, or highlight something else. Apps without paste-over, Firefox and Discord among them, keep a highlight after a click, so there it is when you switch windows, paste it, or highlight something else; a paste always gets the whole highlight. Pasting over a highlight copies nothing, so it shows nothing, and `Ctrl+C` copies are the app's own. Notifications are transient, so they stay out of the notification history, but they are on screen, screen shares included.
 
 Notifications need `notify-send` (`sudo pacman -S libnotify`), a notification daemon, and Hyprland: without its window checks every highlight is copied while you drag, so there is no single moment to announce.
+
+## Copy on mouse release
+
+Wayland does not tell other apps about mouse buttons, so by itself autocopy cannot see the moment a drag ends. A compositor bind on the left button's release can tell it: autocopy copies the highlight when it receives `SIGUSR1`. Pasting over the highlight still works: the clipboard from before it is kept aside, and a paste over the highlight gets it back.
+
+autocopy creates `$XDG_RUNTIME_DIR/autocopy.button` while it runs and understands the signal. The binds below check for that file, because an older autocopy is stopped by `SIGUSR1`. They pass the click on to the app.
+
+Hyprland with a `hyprland.conf`:
+
+```ini
+bindrn = , mouse:272, exec, [ -e "$XDG_RUNTIME_DIR/autocopy.button" ] && pkill -USR1 -x autocopy
+```
+
+Hyprland with a Lua config, skipping fullscreen windows so games do not start `pkill` on every shot:
+
+```lua
+local autocopyFlag = (os.getenv("XDG_RUNTIME_DIR") or "") .. "/autocopy.button"
+hl.bind("mouse:272", function()
+    local w = hl.get_active_window()
+    if w and w.fullscreen ~= 0 then return end
+    local f = io.open(autocopyFlag)
+    if not f then return end
+    f:close()
+    hl.exec_cmd("pkill -USR1 -x autocopy")
+end, { release = true, non_consuming = true, ignore_mods = true })
+```
+
+Highlights made with the keyboard, and any highlight when there is no bind, are still copied when the selection ends.
 
 ## How it works
 
