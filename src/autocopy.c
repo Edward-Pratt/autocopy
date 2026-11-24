@@ -14,13 +14,19 @@
 //     primary selection get this: in the others (Firefox) a highlight stays
 //     "live" after the user clicks into another field, so a paste there
 //     pastes the highlight. What was learned is kept across restarts.
-//   - In those other apps a paste can only mean the highlight, so it is the
-//     clipboard at once, as text only: an app that prefers an HTML or image
-//     type must not get the old clipboard's. It is announced once the drag
-//     settles.
+//   - In those other apps a paste can only mean the highlight, so it holds
+//     the clipboard from its first drag step, as text only: an app that
+//     prefers an HTML or image type must not get the old clipboard's. Pastes
+//     get the highlight as it is at that moment; the copy itself is made
+//     and announced once, when the gesture ends.
 //   - Anything else that ends the gesture commits the highlight to the
 //     clipboard: clicking elsewhere (the app clears primary), pasting it into
 //     another window, or starting a different selection.
+//   - In apps without paste-over, letting go of the mouse button that made the
+//     highlight copies it right away (autocopy_button_released, sent by the
+//     compositor's bind). Apps with paste-over wait for the gesture to end:
+//     the clipboard must keep every type of what was copied before, and a
+//     paste over the highlight could only ask for the highlight's text types.
 //
 // Window identity comes from Hyprland's IPC sockets. Without them every paste
 // commits the highlight, which is plain "select to copy" behaviour.
@@ -41,7 +47,7 @@
 #include "releasers.h"
 
 #define RELEASE_GRACE_MS 100      // Chromium clears and re-sets primary on every drag step
-#define COPY_SETTLE_MS 250        // a highlight that stops changing this long is done
+#define BUTTON_SETTLE_MS 40       // some toolkits set primary just after the button goes up
 
 // The live gesture: the text currently highlighted and where.
 static char *sel;
@@ -54,7 +60,7 @@ static char sel_window[64];
 static char sel_class[128];
 
 static long release_at = -1;  // when a pending primary clear becomes a release, -1 for none
-static long announce_at = -1; // when a highlight copied at once is announced, -1 for none
+static long button_at = -1;   // when a mouse button release copies the highlight, -1 for none
 
 static int same_window(void)
 {
@@ -76,11 +82,10 @@ static void own_highlight(void)
 }
 
 // The gesture made a copy: the clipboard holds it, and that is said once per
-// text. Not part of own_highlight(), which also runs on every drag step when
-// there is no window to compare against.
+// gesture, when it ends. Not part of own_highlight(), which also runs on every
+// drag step when there is no window to compare against.
 static void announce(void)
 {
-	announce_at = -1;
 	if (!sel || sel_announced)
 		return;
 	own_highlight();
@@ -91,7 +96,6 @@ static void announce(void)
 static void discard(void)
 {
 	release_at = -1;
-	announce_at = -1;
 	free(sel);
 	sel = NULL;
 	sel_len = 0;
@@ -192,13 +196,12 @@ void autocopy_primary(char *text, size_t len)
 		discard();
 		return;
 	}
-	if (!releases_primary(sel_class)) {
-		// The first step of a drag takes the clipboard; the rest wait for
-		// the drag to settle, so each step does not replace it again.
-		if (fresh)
-			own_highlight();
-		announce_at = now_ms() + COPY_SETTLE_MS;
-	}
+	// The first step of a drag takes the clipboard, so a paste in this
+	// window cannot get the old clipboard's HTML or image. Later steps do
+	// not replace it: a paste gets the live highlight from autocopy_paste,
+	// and the copy is made once, when the gesture ends.
+	if (fresh && !releases_primary(sel_class))
+		own_highlight();
 }
 
 // Primary cleared. Some toolkits clear and immediately re-set it on every
@@ -245,18 +248,36 @@ void autocopy_focus_changed(void)
 	}
 }
 
+// The mouse button went up. Wait a moment: some toolkits set primary only now.
+void autocopy_button_released(void)
+{
+	button_at = now_ms() + BUTTON_SETTLE_MS;
+}
+
+// A highlight the button just finished is copied now, once. Not in an app
+// with paste-over: there the clipboard from before stays until the gesture
+// ends, so a paste over the highlight gets it with all its types.
+static void finish_button(void)
+{
+	button_at = -1;
+	if (!sel || !sel_live || !same_window() || sel_announced || releases_primary(sel_class))
+		return;
+	logf_("button released in %s: selection copied", focused);
+	announce();
+}
+
 long autocopy_deadline(void)
 {
-	if (release_at < 0 || (announce_at >= 0 && announce_at < release_at))
-		return announce_at;
+	if (release_at < 0 || (button_at >= 0 && button_at < release_at))
+		return button_at;
 	return release_at;
 }
 
 void autocopy_tick(void)
 {
 	long t = now_ms();
+	if (button_at >= 0 && t >= button_at)
+		finish_button();
 	if (release_at >= 0 && t >= release_at)
 		finish_release();
-	if (announce_at >= 0 && t >= announce_at)
-		announce();
 }

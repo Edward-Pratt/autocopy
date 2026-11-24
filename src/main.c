@@ -8,6 +8,7 @@
 #include <wayland-client.h>
 
 #include "autocopy.h"
+#include "button.h"
 #include "device.h"
 #include "ext-data-control-v1-client-protocol.h"
 #include "hypr.h"
@@ -44,7 +45,7 @@ static const struct wl_registry_listener registry_listener = {
 
 // ---- main ----------------------------------------------------------------
 
-static int run(struct wl_display *display, int hypr)
+static int run(struct wl_display *display, int hypr, int sfd)
 {
 	int wfd = wl_display_get_fd(display);
 	for (;;) {
@@ -58,8 +59,9 @@ static int run(struct wl_display *display, int hypr)
 			long left = deadline - now_ms();
 			timeout = left > 0 ? (int)left : 0;
 		}
-		struct pollfd pf[2] = { { wfd, POLLIN, 0 }, { hypr, POLLIN, 0 } };
-		if (poll(pf, hypr >= 0 ? 2 : 1, timeout) < 0 && errno != EINTR) {
+		// A negative fd is skipped by poll.
+		struct pollfd pf[3] = { { wfd, POLLIN, 0 }, { hypr, POLLIN, 0 }, { sfd, POLLIN, 0 } };
+		if (poll(pf, 3, timeout) < 0 && errno != EINTR) {
 			wl_display_cancel_read(display);
 			break;
 		}
@@ -72,6 +74,10 @@ static int run(struct wl_display *display, int hypr)
 		if (hypr >= 0 && (pf[1].revents & (POLLIN | POLLHUP)) &&
 			hypr_read(hypr, autocopy_focus_changed) < 0)
 			hypr = -1;
+		if (sfd >= 0 && (pf[2].revents & POLLIN) && button_read(sfd) < 0) {
+			logf_("stopping");
+			return 0;
+		}
 		autocopy_tick();
 	}
 	logf_("Wayland connection lost");
@@ -83,6 +89,10 @@ int main(void)
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGCHLD, SIG_IGN);
 	setvbuf(stderr, NULL, _IOLBF, 0);
+	// First, so a button release during startup is not fatal.
+	int sfd = button_start();
+	if (sfd < 0)
+		logf_("no signalfd: the mouse button release does not copy");
 
 	struct wl_display *display = wl_display_connect(NULL);
 	if (!display) {
@@ -104,5 +114,5 @@ int main(void)
 		logf_("no Hyprland IPC: every paste commits the highlight");
 	else
 		logf_("watching selections; focused window %s", focused[0] ? focused : "(none)");
-	return run(display, hypr);
+	return run(display, hypr, sfd);
 }

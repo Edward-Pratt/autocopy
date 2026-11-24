@@ -15,6 +15,8 @@ void autocopy_paste(const char *mime, int fd);
 // When autocopy_tick has work to do, in now_ms() time, or -1 for never.
 long autocopy_deadline(void);
 void autocopy_tick(void);
+// The mouse button that makes highlights went up.
+void autocopy_button_released(void);
 // The focused window changed.
 void autocopy_focus_changed(void);
 

@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <signal.h>
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,8 +95,17 @@ void notify_copied(const char *text, size_t len)
 		"notify-send", "--app-name=autocopy", "--urgency=low", "--transient", "--expire-time=1500",
 		"--hint=string:x-canonical-private-synchronous:autocopy", "--", "Copied", body, NULL,
 	};
+	// autocopy blocks the signals it reads through button.c; notify-send
+	// should not inherit that.
+	posix_spawnattr_t attr;
+	sigset_t none;
+	sigemptyset(&none);
+	posix_spawnattr_init(&attr);
+	posix_spawnattr_setsigmask(&attr, &none);
+	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK);
 	pid_t pid;
-	int err = posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ);
+	int err = posix_spawnp(&pid, argv[0], NULL, &attr, argv, environ);
+	posix_spawnattr_destroy(&attr);
 	if (err)
 		logf_("cannot run notify-send: %s", strerror(err));
 }
