@@ -45,6 +45,7 @@
 #include "log.h"
 #include "notify.h"
 #include "releasers.h"
+#include "vscode.h"
 
 #define RELEASE_GRACE_MS 100      // Chromium clears and re-sets primary on every drag step
 #define BUTTON_SETTLE_MS 40       // some toolkits set primary just after the button goes up
@@ -153,6 +154,14 @@ static int continues_gesture(const char *text, size_t len)
 
 void autocopy_primary(char *text, size_t len)
 {
+	// autocopy is off in VS Code: its highlights never start a gesture. One
+	// from another window already ended when focus moved here.
+	if (is_vscode(focused_class)) {
+		if (getenv("AUTOCOPY_DEBUG"))
+			logf_("highlight in %s: autocopy is off there", focused_class);
+		free(text);
+		return;
+	}
 	len = strip_discord_toolbar(focused_class, text, len);
 	if (!len) {
 		// Only Discord's toolbar was highlighted: nothing to copy.

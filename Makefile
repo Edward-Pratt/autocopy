@@ -4,7 +4,7 @@ CFLAGS ?= -O2
 CFLAGS += -std=c11 -Wall -Wextra $(shell pkg-config --cflags wayland-client)
 LDLIBS += $(shell pkg-config --libs wayland-client)
 
-SRC := src/main.c src/autocopy.c src/button.c src/clipboard.c src/content.c src/device.c src/discord.c src/drag.c src/hypr.c src/log.c src/notify.c src/offer.c src/releasers.c src/xdg.c
+SRC := src/main.c src/autocopy.c src/button.c src/clipboard.c src/content.c src/device.c src/discord.c src/drag.c src/hypr.c src/log.c src/notify.c src/offer.c src/releasers.c src/vscode.c src/xdg.c
 GEN := src/ext-data-control-v1-protocol.c src/ext-data-control-v1-client-protocol.h
 
 autocopy: $(SRC) $(wildcard src/*.h) $(GEN)
@@ -27,8 +27,8 @@ tests/discord_test: tests/discord_test.c src/discord.c src/discord.h
 tests/drag_test: tests/drag_test.c src/drag.c src/drag.h
 	$(CC) $(CFLAGS) -Isrc -o $@ tests/drag_test.c src/drag.c
 
-tests/button_test: tests/button_test.c src/autocopy.c src/discord.c src/drag.c $(wildcard src/*.h) $(GEN)
-	$(CC) $(CFLAGS) -Isrc -o $@ tests/button_test.c src/autocopy.c src/discord.c src/drag.c
+tests/button_test: tests/button_test.c src/autocopy.c src/discord.c src/drag.c src/vscode.c $(wildcard src/*.h) $(GEN)
+	$(CC) $(CFLAGS) -Isrc -o $@ tests/button_test.c src/autocopy.c src/discord.c src/drag.c src/vscode.c
 
 clean:
 	rm -f autocopy $(TESTS) $(GEN)

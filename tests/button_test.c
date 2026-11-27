@@ -139,6 +139,19 @@ int main(void)
 	finish();
 	expect(notes, 1, "no bind: the end of the gesture notifies once");
 
+	// VS Code: autocopy is off, so a highlight never touches the clipboard.
+	reset("w3", "code");
+	highlight("he");
+	highlight("hello");
+	release();
+	autocopy_paste("text/plain", 3);
+	expect(sends, 1, "vscode: a paste gets the clipboard as it is");
+	autocopy_primary_clear();
+	wait_ms(200);
+	finish();
+	expect(owns, 0, "vscode: a highlight is never copied");
+	expect(notes, 0, "vscode: a highlight never notifies");
+
 	if (!failed)
 		printf("ok\n");
 	return failed;
